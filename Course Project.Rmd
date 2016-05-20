@@ -1,0 +1,124 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Fan Wang"
+date: "May 16, 2016"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Synopsis
+People use wearable devices to quantify how much of a particular activity they do, but they rarely quantify how well they do it. The goal of this project is to predict the manner in which they did the exercise. I will create a report describing how to build the model, how to use cross validation, find the expected out of sample error is, and decide the prediction model to use. I will also use the prediction model to predict 20 different test cases.
+
+##Data Source
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+##Load the packages
+``` {r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+```
+##Load the data, and do some basic data analyses
+```{r}
+set.seed(3388)
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", na.strings = c("NA", ""))
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", na.strings = c("NA", ""))
+dim(training); dim(testing)
+```
+```{r results='hide'}
+str(training) #Results hidden
+str(testing)
+```
+##Split data into two smaller data sets
+```{r}
+inTrain <- createDataPartition(y=training$classe, p=0.7, list = FALSE)
+train1 <- training[inTrain,]
+train2 <- training[-inTrain,]
+dim(train1); dim(train2)
+```
+##Clean and transform the data
+Remove variables with near zero variance
+```{r}
+nzv1 <- nearZeroVar(train1, saveMetrics = TRUE)
+nzv2 <- nearZeroVar(train2, saveMetrics = TRUE)
+train1 <- train1[, nzv1$nzv == FALSE]
+train2 <- train2[, nzv2$nzv == FALSE]
+```
+Remove the first seven variables, as they do not seem to contribute to the prediction.
+```{r}
+train1 <- train1[, -(1:7)]
+train2 <- train2[, -(1:7)]
+```
+Remove variables that have too many NA values (75%).
+```{r}
+NA75pct <- sapply(train1, function(x) mean(is.na(x))) > 0.75
+NA75pct2 <- sapply(train2, function(x) mean(is.na(x))) > 0.75
+train1 <- train1[, NA75pct==FALSE]
+train2 <- train2[, NA75pct2==FALSE]
+```
+Further reducing the number of features by removing variables that exist in train2 and testing data set, but not in the train1 data set. We will not include "classe" variables in testing data set.
+```{r}
+train1_var <- colnames(train1)
+train2 <- train2[, train1_var]
+final_var <- colnames(train1[, -52])
+testing <- testing[, final_var]
+dim(train1); dim(train2); dim(testing)
+```
+##Build Model
+We will begin prediction with decision tree
+```{r}
+set.seed(138)
+modfit_rpart <- rpart(classe ~ ., data = train1, method = "class")
+pred_rpart <- predict(modfit_rpart, train2, type = "class")
+confusionMatrix(pred_rpart, train2$classe)
+```
+```{r results='hide'}
+fancyRpartPlot(modfit_rpart)
+```
+We can see the prediction accuracy is about 70%. Next, we will try to predict using gbm method.
+```{r}
+set.seed(353)
+modfit_gbm <- train(classe ~ ., method = "gbm", data = train1, verbose = FALSE, trControl = trainControl(method = "repeatedcv", number = 3, repeats = 1))
+pred_gbm <- predict(modfit_gbm, train2)
+confusionMatrix(pred_gbm, train2$classe)
+```
+Accuracy has been significantly increased to 96%.
+Plot the results
+```{r}
+plot(modfit_gbm)
+```
+The last prediction method we will use is random forest.
+```{r}
+set.seed(158)
+modfit_rf <- train(classe ~ ., method = "rf", data = train1, trControl =  trainControl(method = "cv", number = 3))
+pred_rf <- predict(modfit_rf, train2)
+confusionMatrix(pred_rf, train2$classe)
+```
+Accuracy is 99.2% and the expected out of sample error is about 0.8%, so we will use this model to predict on the testing data set.
+Plot the results. We can see that it uses 500 trees, and try 26 variables at each split. Error rate decreases as more trees are involved.
+```{r}
+fin_mod <- modfit_rf$finalModel
+fin_mod
+plot(fin_mod)
+```
+##Predict on testing data set
+Random forest gives best prediction accuracy, so we will use it to predict on testing data set.
+```{r}
+pred_test <- predict(modfit_rf, testing)
+pred_test
+```
+##Conclusion
+After comparing three different types of prediction models, I decided to choose the one that uses random forest algorithm. It gives 99.8% accuracy. The expected out of sample error is very low (0.2%). Following are the "classe" results from predicting on testing set.
+[1] B A B A A E D B A A B C B A E E A B B B
+Levels: A B C D E
